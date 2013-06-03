@@ -1,0 +1,43 @@
+Name:                posix-pty
+Version:             0.1.0
+
+Homepage:            
+Bug-Reports:         
+
+Author:              Merijn Verstraaten
+Maintainer:          Merijn Verstraaten <merijn@inconsistent.nl>
+Copyright:           Copyright © 2013 Merijn Verstraaten
+
+License:             BSD3
+License-File:        LICENSE
+
+Category:            System
+Cabal-Version:       >= 1.10
+Build-Type:          Simple
+Tested-With:         GHC == 7.6.3
+
+Synopsis:            Pseudo terminal interaction with subprocesses.
+
+Description:
+    This package simplifies the creation of subprocesses that interact with
+    their parent via a pseudo terminal (see @man pty@).
+
+Library
+  Default-Language:     Haskell2010
+  GHC-Options:          -Wall
+  GHC-Prof-Options:     -auto-all -caf-all -rtsopts
+  Exposed-Modules:      System.Posix.Pty
+  Other-Modules:        
+
+  C-Sources:            cbits/fork_exec_with_pty.c cbits/pty_size.c
+  CC-Options:           -Wall -Wextra -pedantic -strict -std=c99
+  Include-Dirs:         cbits
+
+  Build-Depends:        base
+               ,        bytestring >= 0.10
+               ,        transformers >= 0.3
+               ,        unix >= 2.6
+
+Source-Repository head
+  Type:     mercurial
+  Location: https://bitbucket.org/merijnv/posix-pty
