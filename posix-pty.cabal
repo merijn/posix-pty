@@ -2,7 +2,7 @@ Name:                posix-pty
 Version:             0.1.0
 
 Homepage:            
-Bug-Reports:         
+Bug-Reports:         https://bitbucket.org/merijnv/posix-pty/issues
 
 Author:              Merijn Verstraaten
 Maintainer:          Merijn Verstraaten <merijn@inconsistent.nl>
@@ -33,11 +33,14 @@ Library
   CC-Options:           -Wall -Wextra -pedantic -strict -std=c99
   Include-Dirs:         cbits
 
-  Build-Depends:        base
+  Build-Depends:        base >= 4 && < 5
                ,        bytestring >= 0.10
-               ,        transformers >= 0.3
                ,        unix >= 2.6
 
 Source-Repository head
   Type:     mercurial
   Location: https://bitbucket.org/merijnv/posix-pty
+
+Source-Repository head
+  Type:     mercurial
+  Location: git+ssh://github.com:merijn/posix-pty.git
