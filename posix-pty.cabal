@@ -1,8 +1,8 @@
 Name:                posix-pty
 Version:             0.1.0
 
-Homepage:            
-Bug-Reports:         https://bitbucket.org/merijnv/posix-pty/issues
+Homepage:            https://bitbucket.org/merijnv/posix-pty
+Bug-Reports:         https://github.com/merijn/posix-pty/issues
 
 Author:              Merijn Verstraaten
 Maintainer:          Merijn Verstraaten <merijn@inconsistent.nl>
@@ -30,8 +30,9 @@ Library
   Other-Modules:        
 
   C-Sources:            cbits/fork_exec_with_pty.c cbits/pty_size.c
-  CC-Options:           -Wall -Wextra -pedantic -strict -std=c99
+  CC-Options:           -Wall -Wextra -pedantic -std=c99
   Include-Dirs:         cbits
+  Includes:             fork_exec_with_pty.h pty_size.h
 
   Build-Depends:        base >= 4 && < 5
                ,        bytestring >= 0.10
