@@ -7,5 +7,6 @@ int
 fork_exec_with_pty(HsInt sx, HsInt sy, int search,
                    const char *file,
                    char *const argv[],
-                   char *const env[]);
+                   char *const env[],
+                   HsInt *outpid);
 #endif

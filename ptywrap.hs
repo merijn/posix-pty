@@ -10,7 +10,7 @@ main :: IO ()
 main = do
   (command:args) <- getArgs >>= \case [] -> error "usage: ptywrap [command to run]"
                                       x -> return x
-  pty <- spawnWithPty Nothing False command args (80, 25)
+  (pty, _) <- spawnWithPty Nothing False command args (80, 25)
   forever $ do
     r <- readPty pty
     C8.putStr r

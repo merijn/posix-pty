@@ -27,7 +27,8 @@ int
 fork_exec_with_pty(HsInt sx, HsInt sy, int search,
                    const char *file,
                    char *const argv[],
-                   char *const env[])
+                   char *const env[],
+		   HsInt *outpid)
 {
     int pty;
     int packet_mode = 1;
@@ -48,7 +49,7 @@ fork_exec_with_pty(HsInt sx, HsInt sy, int search,
     cfsetspeed(&tio, TTYDEF_SPEED);
 
     /* Fork and exec, returning the master pty. */
-    switch (forkpty(&pty, NULL, &tio, &ws)) {
+    switch ((*outpid = forkpty(&pty, NULL, &tio, &ws))) {
     case -1:
         return -1;
     case 0:

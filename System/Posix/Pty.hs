@@ -48,6 +48,7 @@ import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 
+import Unsafe.Coerce (unsafeCoerce)
 import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types
@@ -62,6 +63,8 @@ import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
 import System.Posix.IO.ByteString (fdToHandle)
 import System.Posix.Types
+import System.Process (ProcessHandle)
+import System.Process.Internals (mkProcessHandle)
 
 import qualified System.Posix.Terminal as T
 import System.Posix.Terminal hiding
@@ -181,21 +184,22 @@ spawnWithPty :: Maybe [(String, String)]    -- ^ Optional environment for the
                                             --   program.
              -> (Int, Int)                  -- ^ Initial dimensions for the
                                             --   pseudo terminal.
-             -> IO Pty
+             -> IO (Pty, ProcessHandle)
 spawnWithPty env' search path' argv' (x, y) = do
     path <- newCString path'
     argv <- mapM newCString argv'
     env <- maybe (return []) (mapM fuse) env'
 
-    result <- forkExecWithPty x y path (fromBool search) argv env
+    (ptyFd, cpid) <- forkExecWithPty x y path (fromBool search) argv env
 
     mapM_ free (env ++ argv)
     free path
 
-    throwCErrorOnMinus1 "unable to fork or open new pty" result
+    throwCErrorOnMinus1 "unable to fork or open new pty" ptyFd
 
-    hnd <- fdToHandle result
-    return (Pty result hnd)
+    hnd <- fdToHandle ptyFd
+    ph <- mkProcessHandle (unsafeCoerce cpid) False
+    return (Pty ptyFd hnd, ph)
   where
     fuse (key, val) = newCString (key ++ "=" ++ val)
 
@@ -215,16 +219,18 @@ forkExecWithPty :: Int
                 -> CInt
                 -> [CString]
                 -> [CString]
-                -> IO Fd
+                -> IO (Fd, CInt)
 forkExecWithPty x y path search argv' env' = do
     argv <- newArray0 nullPtr (path:argv')
     env <- case env' of
                 [] -> return nullPtr
                 _  -> newArray0 nullPtr env'
 
-    result <- fork_exec_with_pty x y search path argv env
-    free argv >> free env
-    return result
+    alloca $ \pid -> do
+      result <- fork_exec_with_pty x y search path argv env pid
+      free argv >> free env
+      pid' <- peek pid
+      return (result, pid')
 
 byteToControlCode :: Word8 -> [PtyControlCode]
 byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
@@ -274,6 +280,7 @@ foreign import ccall "fork_exec_with_pty.h"
                        -> CString
                        -> Ptr CString
                        -> Ptr CString
+                       -> Ptr CInt
                        -> IO Fd
 
 -- Pty specialised re-exports of System.Posix.Terminal
