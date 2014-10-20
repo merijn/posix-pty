@@ -1,4 +1,3 @@
-{-# LANGUAGE CApiFFI #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Trustworthy #-}
 -------------------------------------------------------------------------------
