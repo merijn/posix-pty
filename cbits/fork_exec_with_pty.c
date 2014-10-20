@@ -1,12 +1,19 @@
+#define _BSD_SOURCE
+
+#include <sys/types.h>
 #include <sys/ioctl.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #define TTYDEFCHARS
 #include <termios.h>
-#include <unistd.h>
+#ifdef __linux__
+#include <pty.h>
+#else /* bsd/apple */
 #include <util.h>
+#endif
 
 #include <HsFFI.h>
 

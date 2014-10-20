@@ -1,3 +1,4 @@
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Trustworthy #-}
 -------------------------------------------------------------------------------
@@ -49,6 +50,7 @@ import qualified Data.ByteString as BS
 import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types
+import Foreign.C.Error (Errno(..), getErrno)
 
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
@@ -186,7 +188,7 @@ getFd (Pty fd _) = fd
 
 throwCErrorOnMinus1 :: (Eq a, Num a) => String -> a -> IO ()
 throwCErrorOnMinus1 s i = when (i == -1) $ do
-    errnoMsg <- errno >>= peekCString . strerror
+    errnoMsg <- getErrno >>= \(Errno code) -> (peekCString . strerror) code
     ioError . userError $ s ++ ": " ++ errnoMsg
 
 forkExecWithPty :: Int
@@ -237,9 +239,6 @@ tiocPktDoStop = 32
 
 tiocPktNoStop :: Word8
 tiocPktNoStop = 16
-
-foreign import ccall unsafe "errno.h"
-    errno :: IO CInt
 
 foreign import ccall unsafe "string.h"
     strerror :: CInt -> CString
