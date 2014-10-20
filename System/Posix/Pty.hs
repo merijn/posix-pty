@@ -221,18 +221,23 @@ byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
 
 -- Foreign imports
 
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHREAD"
-    tiocPktFlushRead :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHWRITE"
-    tiocPktFlushWrite :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_STOP"
-    tiocPktStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_START"
-    tiocPktStart :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_DOSTOP"
-    tiocPktDoStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_NOSTOP"
-    tiocPktNoStop :: Word8
+tiocPktFlushRead :: Word8
+tiocPktFlushRead = 1
+
+tiocPktFlushWrite :: Word8
+tiocPktFlushWrite = 2
+
+tiocPktStop :: Word8
+tiocPktStop = 4
+
+tiocPktStart :: Word8
+tiocPktStart = 8
+
+tiocPktDoStop :: Word8
+tiocPktDoStop = 32
+
+tiocPktNoStop :: Word8
+tiocPktNoStop = 16
 
 foreign import ccall unsafe "errno.h"
     errno :: IO CInt
