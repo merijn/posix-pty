@@ -22,6 +22,8 @@ Description:
     This package simplifies the creation of subprocesses that interact with
     their parent via a pseudo terminal (see @man pty@).
 
+Extra-Source-Files:   cbits/fork_exec_with_pty.h cbits/pty_size.h
+
 Library
   Default-Language:     Haskell2010
   GHC-Options:          -Wall
@@ -32,7 +34,6 @@ Library
   C-Sources:            cbits/fork_exec_with_pty.c cbits/pty_size.c
   CC-Options:           -Wall -Wextra -pedantic -std=c99
   Include-Dirs:         cbits
-  Includes:             fork_exec_with_pty.h pty_size.h
 
   Build-Depends:        base >= 4 && < 5
                ,        bytestring >= 0.10
