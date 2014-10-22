@@ -1,5 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Trustworthy #-}
 -------------------------------------------------------------------------------
 -- |
@@ -51,6 +52,11 @@ import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types
 import Foreign.C.Error (Errno(..), getErrno)
+
+#if defined(linux_HOST_OS)
+import Foreign.C.Error (eIO)
+import System.IO.Error (catchIOError)
+#endif
 
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
@@ -110,7 +116,7 @@ createPty fd = do
 -- closed, for example when the subprocess has terminated.
 tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
 tryReadPty (Pty _ hnd) = do
-    result <- BS.hGetSome hnd 1024
+    result <- wrap $ BS.hGetSome hnd 1024
     case BS.uncons result of
          Nothing -> ioError ptyClosed
          Just (byte, rest)
@@ -118,6 +124,18 @@ tryReadPty (Pty _ hnd) = do
             | BS.null rest -> return $ Left (byteToControlCode byte)
             | otherwise    -> ioError can'tHappen
   where
+    wrap :: IO a -> IO a
+#if defined(linux_HOST_OS)
+    -- Linux indicates slave pty EOF as EIO
+    -- https://lkml.org/lkml/2009/4/8/578
+    wrap action = catchIOError action $ \ioE -> do
+      errno <- getErrno
+      case errno of
+          e | e == eIO -> ioError ptyClosed
+          _ -> ioError ioE
+#else
+    wrap = id
+#endif
     ptyClosed = mkIOError eofErrorType "pty terminated" Nothing Nothing
     can'tHappen = userError "Uh-oh! Something different went horribly wrong!"
 
