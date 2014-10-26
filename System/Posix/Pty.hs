@@ -1,5 +1,6 @@
-{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Trustworthy #-}
 -------------------------------------------------------------------------------
 -- |
@@ -50,6 +51,12 @@ import qualified Data.ByteString as BS
 import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types
+import Foreign.C.Error (Errno(..), getErrno)
+
+#if defined(linux_HOST_OS)
+import Foreign.C.Error (eIO)
+import System.IO.Error (catchIOError)
+#endif
 
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
@@ -109,7 +116,7 @@ createPty fd = do
 -- closed, for example when the subprocess has terminated.
 tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
 tryReadPty (Pty _ hnd) = do
-    result <- BS.hGetSome hnd 1024
+    result <- wrap $ BS.hGetSome hnd 1024
     case BS.uncons result of
          Nothing -> ioError ptyClosed
          Just (byte, rest)
@@ -117,6 +124,18 @@ tryReadPty (Pty _ hnd) = do
             | BS.null rest -> return $ Left (byteToControlCode byte)
             | otherwise    -> ioError can'tHappen
   where
+    wrap :: IO a -> IO a
+#if defined(linux_HOST_OS)
+    -- Linux indicates slave pty EOF as EIO
+    -- https://lkml.org/lkml/2009/4/8/578
+    wrap action = catchIOError action $ \ioE -> do
+      errno <- getErrno
+      case errno of
+          e | e == eIO -> ioError ptyClosed
+          _ -> ioError ioE
+#else
+    wrap = id
+#endif
     ptyClosed = mkIOError eofErrorType "pty terminated" Nothing Nothing
     can'tHappen = userError "Uh-oh! Something different went horribly wrong!"
 
@@ -187,7 +206,7 @@ getFd (Pty fd _) = fd
 
 throwCErrorOnMinus1 :: (Eq a, Num a) => String -> a -> IO ()
 throwCErrorOnMinus1 s i = when (i == -1) $ do
-    errnoMsg <- errno >>= peekCString . strerror
+    errnoMsg <- getErrno >>= \(Errno code) -> (peekCString . strerror) code
     ioError . userError $ s ++ ": " ++ errnoMsg
 
 forkExecWithPty :: Int
@@ -221,21 +240,23 @@ byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
 
 -- Foreign imports
 
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHREAD"
-    tiocPktFlushRead :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHWRITE"
-    tiocPktFlushWrite :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_STOP"
-    tiocPktStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_START"
-    tiocPktStart :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_DOSTOP"
-    tiocPktDoStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_NOSTOP"
-    tiocPktNoStop :: Word8
+tiocPktFlushRead :: Word8
+tiocPktFlushRead = 1
 
-foreign import ccall unsafe "errno.h"
-    errno :: IO CInt
+tiocPktFlushWrite :: Word8
+tiocPktFlushWrite = 2
+
+tiocPktStop :: Word8
+tiocPktStop = 4
+
+tiocPktStart :: Word8
+tiocPktStart = 8
+
+tiocPktDoStop :: Word8
+tiocPktDoStop = 32
+
+tiocPktNoStop :: Word8
+tiocPktNoStop = 16
 
 foreign import ccall unsafe "string.h"
     strerror :: CInt -> CString
