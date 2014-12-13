@@ -1,5 +1,6 @@
-{-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE Trustworthy #-}
 -------------------------------------------------------------------------------
 -- |
@@ -46,15 +47,25 @@ import Control.Applicative
 import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
 
+import Unsafe.Coerce (unsafeCoerce)
 import Foreign
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types
+import Foreign.C.Error (Errno(..), getErrno)
+
+#if defined(linux_HOST_OS)
+import Foreign.C.Error (eIO)
+import System.IO.Error (catchIOError)
+#endif
 
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
-import System.Posix.IO.ByteString (fdToHandle)
+import System.Posix.IO.ByteString (fdToHandle, fdReadBuf)
 import System.Posix.Types
+import System.Process (ProcessHandle)
+import System.Process.Internals (mkProcessHandle)
 
 import qualified System.Posix.Terminal as T
 import System.Posix.Terminal hiding
@@ -101,6 +112,37 @@ createPty fd = do
        then Just . Pty fd <$> fdToHandle fd
        else return Nothing
 
+-- | Read data from a fd using read() system call avoiding GHC.IO buffering.
+--
+-- Throws an 'IOError' of type 'eofErrorType'.
+fdReadBS :: Fd -> ByteCount -> IO ByteString
+fdReadBS fd n
+  | n <= 0    = return BS.empty
+  | otherwise = BSI.createAndTrim (fromIntegral n) fill
+  where
+    fill buf = do
+      rc <- wrap (fdReadBuf fd buf n)
+      case rc of
+        _ | rc == 0 -> eof
+          | otherwise -> return (fromIntegral rc)
+
+    wrap :: IO a -> IO a
+#if defined(linux_HOST_OS)
+    -- Linux indicates slave pty EOF as EIO
+    -- https://lkml.org/lkml/2009/4/8/578
+    wrap action = catchIOError action $ \ioE -> do
+      errno <- getErrno
+      case errno of
+          e | e == eIO -> eof
+          _ -> ioError ioE
+#else
+    wrap = id
+#endif
+
+    eof = do
+      hnd <- fdToHandle fd
+      ioError $ mkIOError eofErrorType "eof" (Just hnd) Nothing
+
 -- | Attempt to read data from a pseudo terminal. Produces either the data read
 -- or a list of 'PtyControlCode'@s@ indicating which control status events that
 -- have happened on the slave terminal.
@@ -108,16 +150,15 @@ createPty fd = do
 -- Throws an 'IOError' of type 'eofErrorType' when the terminal has been
 -- closed, for example when the subprocess has terminated.
 tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
-tryReadPty (Pty _ hnd) = do
-    result <- BS.hGetSome hnd 1024
+tryReadPty (Pty fd _) = do
+    result <- fdReadBS fd 1024
     case BS.uncons result of
-         Nothing -> ioError ptyClosed
          Just (byte, rest)
             | byte == 0    -> return (Right rest)
-            | BS.null rest -> return $ Left (byteToControlCode byte)
+            | BS.null rest -> return (Left $ byteToControlCode byte)
             | otherwise    -> ioError can'tHappen
+         Nothing -> ioError can'tHappen
   where
-    ptyClosed = mkIOError eofErrorType "pty terminated" Nothing Nothing
     can'tHappen = userError "Uh-oh! Something different went horribly wrong!"
 
 -- | The same as 'tryReadPty', but discards any control status events.
@@ -162,21 +203,22 @@ spawnWithPty :: Maybe [(String, String)]    -- ^ Optional environment for the
                                             --   program.
              -> (Int, Int)                  -- ^ Initial dimensions for the
                                             --   pseudo terminal.
-             -> IO Pty
+             -> IO (Pty, ProcessHandle)
 spawnWithPty env' search path' argv' (x, y) = do
     path <- newCString path'
     argv <- mapM newCString argv'
     env <- maybe (return []) (mapM fuse) env'
 
-    result <- forkExecWithPty x y path (fromBool search) argv env
+    (ptyFd, cpid) <- forkExecWithPty x y path (fromBool search) argv env
 
     mapM_ free (env ++ argv)
     free path
 
-    throwCErrorOnMinus1 "unable to fork or open new pty" result
+    throwCErrorOnMinus1 "unable to fork or open new pty" ptyFd
 
-    hnd <- fdToHandle result
-    return (Pty result hnd)
+    hnd <- fdToHandle ptyFd
+    ph <- mkProcessHandle (unsafeCoerce cpid) False
+    return (Pty ptyFd hnd, ph)
   where
     fuse (key, val) = newCString (key ++ "=" ++ val)
 
@@ -187,7 +229,7 @@ getFd (Pty fd _) = fd
 
 throwCErrorOnMinus1 :: (Eq a, Num a) => String -> a -> IO ()
 throwCErrorOnMinus1 s i = when (i == -1) $ do
-    errnoMsg <- errno >>= peekCString . strerror
+    errnoMsg <- getErrno >>= \(Errno code) -> (peekCString . strerror) code
     ioError . userError $ s ++ ": " ++ errnoMsg
 
 forkExecWithPty :: Int
@@ -196,16 +238,18 @@ forkExecWithPty :: Int
                 -> CInt
                 -> [CString]
                 -> [CString]
-                -> IO Fd
+                -> IO (Fd, CInt)
 forkExecWithPty x y path search argv' env' = do
     argv <- newArray0 nullPtr (path:argv')
     env <- case env' of
                 [] -> return nullPtr
                 _  -> newArray0 nullPtr env'
 
-    result <- fork_exec_with_pty x y search path argv env
-    free argv >> free env
-    return result
+    alloca $ \pid -> do
+      result <- fork_exec_with_pty x y search path argv env pid
+      free argv >> free env
+      pid' <- peek pid
+      return (result, pid')
 
 byteToControlCode :: Word8 -> [PtyControlCode]
 byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
@@ -221,21 +265,23 @@ byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
 
 -- Foreign imports
 
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHREAD"
-    tiocPktFlushRead :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHWRITE"
-    tiocPktFlushWrite :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_STOP"
-    tiocPktStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_START"
-    tiocPktStart :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_DOSTOP"
-    tiocPktDoStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_NOSTOP"
-    tiocPktNoStop :: Word8
+tiocPktFlushRead :: Word8
+tiocPktFlushRead = 1
 
-foreign import ccall unsafe "errno.h"
-    errno :: IO CInt
+tiocPktFlushWrite :: Word8
+tiocPktFlushWrite = 2
+
+tiocPktStop :: Word8
+tiocPktStop = 4
+
+tiocPktStart :: Word8
+tiocPktStart = 8
+
+tiocPktDoStop :: Word8
+tiocPktDoStop = 32
+
+tiocPktNoStop :: Word8
+tiocPktNoStop = 16
 
 foreign import ccall unsafe "string.h"
     strerror :: CInt -> CString
@@ -253,6 +299,7 @@ foreign import ccall "fork_exec_with_pty.h"
                        -> CString
                        -> Ptr CString
                        -> Ptr CString
+                       -> Ptr CInt
                        -> IO Fd
 
 -- Pty specialised re-exports of System.Posix.Terminal
