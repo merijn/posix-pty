@@ -47,6 +47,7 @@ import Control.Applicative
 import Control.Monad
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
 
 import Unsafe.Coerce (unsafeCoerce)
 import Foreign
@@ -61,7 +62,7 @@ import System.IO.Error (catchIOError)
 
 import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
-import System.Posix.IO.ByteString (fdToHandle)
+import System.Posix.IO.ByteString (fdToHandle, fdReadBuf)
 import System.Posix.Types
 import System.Process (ProcessHandle)
 import System.Process.Internals (mkProcessHandle)
@@ -111,22 +112,20 @@ createPty fd = do
        then Just . Pty fd <$> fdToHandle fd
        else return Nothing
 
--- | Attempt to read data from a pseudo terminal. Produces either the data read
--- or a list of 'PtyControlCode'@s@ indicating which control status events that
--- have happened on the slave terminal.
+-- | Read data from a fd using read() system call avoiding GHC.IO buffering.
 --
--- Throws an 'IOError' of type 'eofErrorType' when the terminal has been
--- closed, for example when the subprocess has terminated.
-tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
-tryReadPty (Pty _ hnd) = do
-    result <- wrap $ BS.hGetSome hnd 1024
-    case BS.uncons result of
-         Nothing -> ioError ptyClosed
-         Just (byte, rest)
-            | byte == 0    -> return (Right rest)
-            | BS.null rest -> return $ Left (byteToControlCode byte)
-            | otherwise    -> ioError can'tHappen
+-- Throws an 'IOError' of type 'eofErrorType'.
+fdReadBS :: Fd -> ByteCount -> IO ByteString
+fdReadBS fd n
+  | n <= 0    = return BS.empty
+  | otherwise = BSI.createAndTrim (fromIntegral n) fill
   where
+    fill buf = do
+      rc <- wrap (fdReadBuf fd buf n)
+      case rc of
+        _ | rc == 0 -> eof
+          | otherwise -> return (fromIntegral rc)
+
     wrap :: IO a -> IO a
 #if defined(linux_HOST_OS)
     -- Linux indicates slave pty EOF as EIO
@@ -134,12 +133,32 @@ tryReadPty (Pty _ hnd) = do
     wrap action = catchIOError action $ \ioE -> do
       errno <- getErrno
       case errno of
-          e | e == eIO -> ioError ptyClosed
+          e | e == eIO -> eof
           _ -> ioError ioE
 #else
     wrap = id
 #endif
-    ptyClosed = mkIOError eofErrorType "pty terminated" Nothing Nothing
+
+    eof = do
+      hnd <- fdToHandle fd
+      ioError $ mkIOError eofErrorType "eof" (Just hnd) Nothing
+
+-- | Attempt to read data from a pseudo terminal. Produces either the data read
+-- or a list of 'PtyControlCode'@s@ indicating which control status events that
+-- have happened on the slave terminal.
+--
+-- Throws an 'IOError' of type 'eofErrorType' when the terminal has been
+-- closed, for example when the subprocess has terminated.
+tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
+tryReadPty (Pty fd _) = do
+    result <- fdReadBS fd 1024
+    case BS.uncons result of
+         Just (byte, rest)
+            | byte == 0    -> return (Right rest)
+            | BS.null rest -> return (Left $ byteToControlCode byte)
+            | otherwise    -> ioError can'tHappen
+         Nothing -> ioError can'tHappen
+  where
     can'tHappen = userError "Uh-oh! Something different went horribly wrong!"
 
 -- | The same as 'tryReadPty', but discards any control status events.
