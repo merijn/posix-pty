@@ -1,0 +1,3 @@
+Vladimir Kirillov
+    - Found an issue with GHC buffering losing binds and wrote an initial
+      implementation to read ByteString with read(2) semantics.
