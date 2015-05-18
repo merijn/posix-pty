@@ -1,6 +1,8 @@
 {-# LANGUAGE CApiFFI #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE Trustworthy #-}
+{-# LANGUAGE ViewPatterns #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module      :  System.Posix.Pty
@@ -28,6 +30,11 @@ module System.Posix.Pty (
     , writePty
     , resizePty
     , ptyDimensions
+    -- * Blocking on 'Pty's
+    , threadWaitReadPty
+    , threadWaitWritePty
+    , threadWaitReadPtySTM
+    , threadWaitWritePtySTM
     -- * Re-exports of "System.Posix.Terminal"
     -- $posix-reexport
     , getTerminalAttributes
@@ -42,19 +49,31 @@ module System.Posix.Pty (
     , module System.Posix.Terminal
     ) where
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative
-import Control.Monad
+#endif
+
+import Control.Exception (bracket, throwIO, ErrorCall(..))
+import Control.Monad (when)
+
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BS (createAndTrim)
+import qualified Data.ByteString.Unsafe as BS (unsafeUseAsCString)
+
+import GHC.Conc (STM)
+import GHC.Conc.IO (threadWaitRead, threadWaitWrite,
+                    threadWaitReadSTM, threadWaitWriteSTM)
 
 import Foreign
-import Foreign.C.String (CString, newCString, peekCString)
+import Foreign.C.Error (throwErrnoIfMinus1Retry, throwErrnoIfMinus1Retry_)
+import Foreign.C.String (CString, newCString)
 import Foreign.C.Types
 
-import System.IO (Handle)
 import System.IO.Error (mkIOError, eofErrorType)
-import System.Posix.IO.ByteString (fdToHandle)
+import System.Posix.IO (fdReadBuf, fdWriteBuf)
 import System.Posix.Types
+import System.Process.Internals (mkProcessHandle, ProcessHandle)
 
 import qualified System.Posix.Terminal as T
 import System.Posix.Terminal hiding
@@ -72,7 +91,7 @@ import System.Posix.Terminal hiding
         , getSlaveTerminalName)
 
 -- | Abstract pseudo terminal type.
-data Pty = Pty !Fd !Handle
+newtype Pty = Pty Fd
 
 -- | Pseudo terminal control information.
 --
@@ -96,10 +115,10 @@ data PtyControlCode = FlushRead     -- ^ Terminal read queue was flushed.
 -- Nothing if not.
 createPty :: Fd -> IO (Maybe Pty)
 createPty fd = do
-    isTerm <- T.queryTerminal fd
-    if isTerm
-       then Just . Pty fd <$> fdToHandle fd
-       else return Nothing
+    isTerminal <- T.queryTerminal fd
+    let result | isTerminal = Just (Pty fd)
+               | otherwise  = Nothing
+    return result
 
 -- | Attempt to read data from a pseudo terminal. Produces either the data read
 -- or a list of 'PtyControlCode'@s@ indicating which control status events that
@@ -108,8 +127,8 @@ createPty fd = do
 -- Throws an 'IOError' of type 'eofErrorType' when the terminal has been
 -- closed, for example when the subprocess has terminated.
 tryReadPty :: Pty -> IO (Either [PtyControlCode] ByteString)
-tryReadPty (Pty _ hnd) = do
-    result <- BS.hGetSome hnd 1024
+tryReadPty (Pty fd) = do
+    result <- readBS 1024
     case BS.uncons result of
          Nothing -> ioError ptyClosed
          Just (byte, rest)
@@ -117,8 +136,25 @@ tryReadPty (Pty _ hnd) = do
             | BS.null rest -> return $ Left (byteToControlCode byte)
             | otherwise    -> ioError can'tHappen
   where
+    ptyClosed :: IOError
     ptyClosed = mkIOError eofErrorType "pty terminated" Nothing Nothing
+
+    can'tHappen :: IOError
     can'tHappen = userError "Uh-oh! Something different went horribly wrong!"
+
+    readBS :: ByteCount -> IO ByteString
+    readBS n
+      | n <= 0    = return BS.empty
+      | overflow  = throwIO (ErrorCall "invalid size for read")
+      | otherwise = BS.createAndTrim (fromIntegral n) $
+                        fmap fromIntegral . fillBuf
+      where
+        overflow :: Bool
+        overflow = n >= fromIntegral (maxBound :: Int)
+
+        fillBuf :: Ptr Word8 -> IO ByteCount
+        fillBuf buf = throwErrnoIfMinus1Retry "read failed" $
+                            fdReadBuf fd buf n
 
 -- | The same as 'tryReadPty', but discards any control status events.
 readPty :: Pty -> IO ByteString
@@ -129,17 +165,24 @@ readPty pty = tryReadPty pty >>= \case
 -- | Write a 'ByteString' to the pseudo terminal, throws an 'IOError' when the
 -- terminal has been closed, for example when the subprocess has terminated.
 writePty :: Pty -> ByteString -> IO ()
-writePty (Pty _ hnd) = BS.hPut hnd
+writePty (Pty fd) bs =
+    BS.unsafeUseAsCString bs $ write (fromIntegral (BS.length bs)) . castPtr
+  where
+    write :: ByteCount -> Ptr Word8 -> IO ()
+    write len buf = do
+        res <- throwErrnoIfMinus1Retry "write failed" $ fdWriteBuf fd buf len
+        when (res < len) $ do
+            write (len - res) $ plusPtr buf (fromIntegral res)
 
 -- | Set the pseudo terminal's dimensions to the specified width and height.
 resizePty :: Pty -> (Int, Int) -> IO ()
-resizePty (Pty fd _) (x, y) =
-    set_pty_size fd x y >>= throwCErrorOnMinus1 "unable to set pty dimensions"
+resizePty (Pty fd) (x, y) =
+  throwErrnoIfMinus1Retry_ "unable to set pty dimensions" $ set_pty_size fd x y
 
 -- | Produces the pseudo terminal's current dimensions.
 ptyDimensions :: Pty -> IO (Int, Int)
-ptyDimensions (Pty fd _) = alloca $ \x -> alloca $ \y -> do
-    get_pty_size fd x y >>= throwCErrorOnMinus1 "unable to get pty size"
+ptyDimensions (Pty fd) = alloca $ \x -> alloca $ \y -> do
+    throwErrnoIfMinus1Retry_ "unable to get pty size" $ get_pty_size fd x y
     (,) <$> peek x <*> peek y
 
 -- | Create a new process that is connected to the current process through a
@@ -162,50 +205,48 @@ spawnWithPty :: Maybe [(String, String)]    -- ^ Optional environment for the
                                             --   program.
              -> (Int, Int)                  -- ^ Initial dimensions for the
                                             --   pseudo terminal.
-             -> IO Pty
-spawnWithPty env' search path' argv' (x, y) = do
-    path <- newCString path'
-    argv <- mapM newCString argv'
-    env <- maybe (return []) (mapM fuse) env'
+             -> IO (Pty, ProcessHandle)
+spawnWithPty env' (fromBool -> search) path' argv' (x, y) = do
+    bracket allocStrings cleanupStrings $ \(path, argvList, envList) -> do
+        let allocLists = do
+                argv <- newArray0 nullPtr (path : argvList)
+                env <- case envList of
+                        [] -> return nullPtr
+                        _ -> newArray0 nullPtr envList
+                return (argv, env)
 
-    result <- forkExecWithPty x y path (fromBool search) argv env
+            cleanupLists (argv, env) = free argv >> free env
 
-    mapM_ free (env ++ argv)
-    free path
+        bracket allocLists cleanupLists $ \(argv, env) -> do
+            alloca $ \pidPtr -> do
+                fd <- throwErrnoIfMinus1Retry "failed to fork or open pty" $
+                        fork_exec_with_pty x y search path argv env pidPtr
 
-    throwCErrorOnMinus1 "unable to fork or open new pty" result
+                pid <- peek pidPtr
+                handle <- mkProcessHandle (fromIntegral pid) True
 
-    hnd <- fdToHandle result
-    return (Pty result hnd)
+                return (Pty fd, handle)
   where
+    fuse :: (String, String) -> IO CString
     fuse (key, val) = newCString (key ++ "=" ++ val)
+
+    allocStrings :: IO (CString, [CString], [CString])
+    allocStrings = do
+        path <- newCString path'
+        argv <- mapM newCString argv'
+        env <- maybe (return []) (mapM fuse) env'
+        return (path, argv, env)
+
+    cleanupStrings :: (CString, [CString], [CString]) -> IO ()
+    cleanupStrings (path, argv, env) = do
+        free path
+        mapM_ free argv
+        mapM_ free env
 
 -- Module internal functions
 
 getFd :: Pty -> Fd
-getFd (Pty fd _) = fd
-
-throwCErrorOnMinus1 :: (Eq a, Num a) => String -> a -> IO ()
-throwCErrorOnMinus1 s i = when (i == -1) $ do
-    errnoMsg <- errno >>= peekCString . strerror
-    ioError . userError $ s ++ ": " ++ errnoMsg
-
-forkExecWithPty :: Int
-                -> Int
-                -> CString
-                -> CInt
-                -> [CString]
-                -> [CString]
-                -> IO Fd
-forkExecWithPty x y path search argv' env' = do
-    argv <- newArray0 nullPtr (path:argv')
-    env <- case env' of
-                [] -> return nullPtr
-                _  -> newArray0 nullPtr env'
-
-    result <- fork_exec_with_pty x y search path argv env
-    free argv >> free env
-    return result
+getFd (Pty fd) = fd
 
 byteToControlCode :: Word8 -> [PtyControlCode]
 byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
@@ -221,24 +262,18 @@ byteToControlCode i = map snd $ filter ((/=0) . (.&.i) . fst) codeMapping
 
 -- Foreign imports
 
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHREAD"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_FLUSHREAD"
     tiocPktFlushRead :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_FLUSHWRITE"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_FLUSHWRITE"
     tiocPktFlushWrite :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_STOP"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_STOP"
     tiocPktStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_START"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_START"
     tiocPktStart :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_DOSTOP"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_DOSTOP"
     tiocPktDoStop :: Word8
-foreign import capi unsafe "sys/termios.h value TIOCPKT_NOSTOP"
+foreign import capi unsafe "sys/ioctl.h value TIOCPKT_NOSTOP"
     tiocPktNoStop :: Word8
-
-foreign import ccall unsafe "errno.h"
-    errno :: IO CInt
-
-foreign import ccall unsafe "string.h"
-    strerror :: CInt -> CString
 
 foreign import ccall "pty_size.h"
     set_pty_size :: Fd -> Int -> Int -> IO CInt
@@ -253,7 +288,25 @@ foreign import ccall "fork_exec_with_pty.h"
                        -> CString
                        -> Ptr CString
                        -> Ptr CString
+                       -> Ptr Int
                        -> IO Fd
+
+-- Pty specialised versions of GHC.Conc.IO
+-- | Equivalent to 'threadWaitRead'.
+threadWaitReadPty :: Pty -> IO ()
+threadWaitReadPty = threadWaitRead . getFd
+
+-- | Equivalent to 'threadWaitWrite'.
+threadWaitWritePty :: Pty -> IO ()
+threadWaitWritePty = threadWaitWrite . getFd
+
+-- | Equivalent to 'threadWaitReadSTM'.
+threadWaitReadPtySTM :: Pty -> IO (STM (), IO ())
+threadWaitReadPtySTM = threadWaitReadSTM . getFd
+
+-- | Equivalent to 'threadWaitWriteSTM'.
+threadWaitWritePtySTM :: Pty -> IO (STM (), IO ())
+threadWaitWritePtySTM = threadWaitWriteSTM . getFd
 
 -- Pty specialised re-exports of System.Posix.Terminal
 

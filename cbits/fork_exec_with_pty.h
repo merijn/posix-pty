@@ -4,8 +4,13 @@
 #include <HsFFI.h>
 
 int
-fork_exec_with_pty(HsInt sx, HsInt sy, int search,
-                   const char *file,
-                   char *const argv[],
-                   char *const env[]);
+fork_exec_with_pty
+    ( HsInt sx
+    , HsInt sy
+    , int search
+    , const char *file
+    , char *const argv[]
+    , char *const env[]
+    , HsInt *child_pid
+    );
 #endif

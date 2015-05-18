@@ -1,5 +1,5 @@
 Name:                posix-pty
-Version:             0.1.1
+Version:             0.2.0
 
 Homepage:            https://bitbucket.org/merijnv/posix-pty
 Bug-Reports:         https://github.com/merijn/posix-pty/issues
@@ -22,7 +22,7 @@ Description:
     This package simplifies the creation of subprocesses that interact with
     their parent via a pseudo terminal (see @man pty@).
 
-Extra-Source-Files:     fork_exec_with_pty.h pty_size.h
+Extra-Source-Files:     cbits/*.h
 
 Library
   Default-Language:     Haskell2010
@@ -38,10 +38,11 @@ Library
 
   Build-Depends:        base >= 4 && < 5
                ,        bytestring >= 0.10
+               ,        process >= 1.2
                ,        unix >= 2.6
 
-  if !os(darwin)
-    Buildable: False
+  if os(linux) || os(freebsd)
+    Extra-Libraries: util
 
 Source-Repository head
   Type:     git

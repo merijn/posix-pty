@@ -1,12 +1,23 @@
+#define _BSD_SOURCE
 #include <sys/ioctl.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
 #define TTYDEFCHARS
 #include <termios.h>
-#include <unistd.h>
+#include <sys/ttydefaults.h>
+#undef TTYDEFCHARS
+
+#if defined(__APPLE__)
 #include <util.h>
+#elif defined(__linux__)
+#include <pty.h>
+#else /* bsd */
+#include <libutil.h>
+#endif
 
 #include <HsFFI.h>
 
@@ -17,10 +28,15 @@ extern char **environ;
 
 /* Fork and exec with a pty, returning the fd of the master pty. */
 int
-fork_exec_with_pty(HsInt sx, HsInt sy, int search,
-                   const char *file,
-                   char *const argv[],
-                   char *const env[])
+fork_exec_with_pty
+    ( HsInt sx
+    , HsInt sy
+    , int search
+    , const char *file
+    , char *const argv[]
+    , char *const env[]
+    , HsInt *child_pid
+    )
 {
     int pty;
     int packet_mode = 1;
@@ -41,7 +57,8 @@ fork_exec_with_pty(HsInt sx, HsInt sy, int search,
     cfsetspeed(&tio, TTYDEF_SPEED);
 
     /* Fork and exec, returning the master pty. */
-    switch (forkpty(&pty, NULL, &tio, &ws)) {
+    *child_pid = forkpty(&pty, NULL, &tio, &ws);
+    switch (*child_pid) {
     case -1:
         return -1;
     case 0:
