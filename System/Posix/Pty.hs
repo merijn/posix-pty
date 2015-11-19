@@ -25,6 +25,7 @@ module System.Posix.Pty (
     , PtyControlCode (..)
     -- * Pty Interaction Functions
     , createPty
+    , closePty
     , tryReadPty
     , readPty
     , writePty
@@ -71,7 +72,7 @@ import Foreign.C.String (CString, newCString)
 import Foreign.C.Types
 
 import System.IO.Error (mkIOError, eofErrorType)
-import System.Posix.IO (fdReadBuf, fdWriteBuf)
+import System.Posix.IO (fdReadBuf, fdWriteBuf,closeFd)
 import System.Posix.Types
 import System.Process.Internals (mkProcessHandle, ProcessHandle)
 
@@ -119,6 +120,10 @@ createPty fd = do
     let result | isTerminal = Just (Pty fd)
                | otherwise  = Nothing
     return result
+
+-- | Close this pseudo terminal.
+closePty :: Pty -> IO ()
+closePty (Pty fd) = closeFd fd
 
 -- | Attempt to read data from a pseudo terminal. Produces either the data read
 -- or a list of 'PtyControlCode'@s@ indicating which control status events that
