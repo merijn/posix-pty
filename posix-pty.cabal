@@ -45,6 +45,17 @@ Library
   if os(linux) || os(freebsd)
     Extra-Libraries: util
 
+Test-Suite stty
+  Type: exitcode-stdio-1.0
+  Default-Language:     Haskell2010
+  Main-Is:              stty.hs
+  Ghc-Options:          -w -threaded -rtsopts -with-rtsopts=-N
+  Hs-Source-Dirs:       tests
+  Build-Depends:        base
+               ,        bytestring
+               ,        posix-pty
+               ,        process
+
 Source-Repository head
   Type:     git
   Location: ssh://github.com:merijn/posix-pty.git
