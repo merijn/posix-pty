@@ -41,23 +41,14 @@ fork_exec_with_pty
     int pty;
     int packet_mode = 1;
     struct winsize ws;
-    struct termios tio;
 
     /* Set the terminal size and settings. */
     memset(&ws, 0, sizeof ws);
     ws.ws_col = sx;
     ws.ws_row = sy;
 
-    memset(&tio, 0, sizeof tio);
-    tio.c_iflag = TTYDEF_IFLAG;
-    tio.c_oflag = TTYDEF_OFLAG;
-    tio.c_lflag = TTYDEF_LFLAG;
-    tio.c_cflag = TTYDEF_CFLAG;
-    memcpy(&tio.c_cc, ttydefchars, sizeof tio.c_cc);
-    cfsetspeed(&tio, TTYDEF_SPEED);
-
     /* Fork and exec, returning the master pty. */
-    *child_pid = forkpty(&pty, NULL, &tio, &ws);
+    *child_pid = forkpty(&pty, NULL, NULL, &ws);
     switch (*child_pid) {
     case -1:
         return -1;
