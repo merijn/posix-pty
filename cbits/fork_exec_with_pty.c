@@ -13,9 +13,9 @@
 
 #if defined(__APPLE__)
 #include <util.h>
-#elif defined(__linux__)
+#elif defined(__GLIBC__)
 #include <pty.h>
-#else /* bsd */
+#else /* bsd without glibc */
 #include <libutil.h>
 #endif
 
