@@ -43,7 +43,7 @@ Library
                ,        unix >= 2.6
 
   if os(linux) || os(freebsd)
-    Extra-Libraries: util
+    Build-Depends: util
 
 Test-Suite stty
   Type: exitcode-stdio-1.0
