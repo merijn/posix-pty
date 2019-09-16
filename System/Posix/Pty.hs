@@ -54,6 +54,7 @@ module System.Posix.Pty (
 import Control.Applicative
 #endif
 
+import Control.Concurrent (newMVar, withMVar, MVar)
 import Control.Exception (bracket, throwIO, ErrorCall(..))
 import Control.Monad (when)
 
@@ -72,6 +73,7 @@ import Foreign.C.String (CString, newCString)
 import Foreign.C.Types
 
 import System.IO.Error (mkIOError, eofErrorType)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.IO (fdReadBuf, fdWriteBuf,closeFd)
 import System.Posix.Types
 import System.Process.Internals (mkProcessHandle, ProcessHandle)
@@ -197,6 +199,18 @@ ptyDimensions (Pty fd) = alloca $ \x -> alloca $ \y -> do
 --
 -- > pty <- spawnWithPty (Just [("SHELL", "tcsh")]) True "ls" ["-l"] (20, 10)
 --
+
+
+-- spawnWithPty() blocks signals around the fork().
+-- Since blocking/unblocking of signals is a global state
+-- operation, we better ensure mutual exclusion of calls to
+-- spawnWithPty().
+-- This comment and approach taken from System.Process.Posix.
+{-# NOINLINE spawnWithPty_lock #-}
+spawnWithPty_lock :: MVar ()
+spawnWithPty_lock = unsafePerformIO $ newMVar ()
+
+
 -- This searches the user's PATH for a binary called @ls@, then runs this
 -- binary with the commandline argument @-l@ in a terminal that is 20
 -- characters wide and 10 characters high. The environment of @ls@ will
@@ -225,7 +239,8 @@ spawnWithPty env' (fromBool -> search) path' argv' (x, y) = do
         bracket allocLists cleanupLists $ \(argv, env) -> do
             alloca $ \pidPtr -> do
                 fd <- throwErrnoIfMinus1Retry "failed to fork or open pty" $
-                        fork_exec_with_pty x y search path argv env pidPtr
+                        withMVar spawnWithPty_lock $ \_ ->
+                          fork_exec_with_pty x y search path argv env pidPtr
 
                 pid <- peek pidPtr
                 handle <- mkProcessHandle (fromIntegral pid) True
