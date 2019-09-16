@@ -33,7 +33,7 @@ Library
   Other-Modules:        
 
   C-Sources:            cbits/fork_exec_with_pty.c cbits/pty_size.c
-  CC-Options:           -Wall -Wextra -pedantic -std=c99
+  CC-Options:           -Wall -Wextra -std=c99
   Include-Dirs:         cbits
   Includes:             fork_exec_with_pty.h pty_size.h
 

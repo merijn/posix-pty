@@ -280,13 +280,13 @@ foreign import capi unsafe "sys/ioctl.h value TIOCPKT_DOSTOP"
 foreign import capi unsafe "sys/ioctl.h value TIOCPKT_NOSTOP"
     tiocPktNoStop :: Word8
 
-foreign import ccall "pty_size.h"
+foreign import ccall unsafe "pty_size.h"
     set_pty_size :: Fd -> Int -> Int -> IO CInt
 
-foreign import ccall "pty_size.h"
+foreign import ccall unsafe "pty_size.h"
     get_pty_size :: Fd -> Ptr Int -> Ptr Int -> IO CInt
 
-foreign import ccall "fork_exec_with_pty.h"
+foreign import ccall unsafe "fork_exec_with_pty.h"
     fork_exec_with_pty :: Int
                        -> Int
                        -> CInt
