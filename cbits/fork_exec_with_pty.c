@@ -49,8 +49,6 @@ fork_exec_with_pty
     int packet_mode = 1;
     struct winsize ws;
 
-    int ret = pty;
-
     /* Set the terminal size and settings. */
     memset(&ws, 0, sizeof ws);
     ws.ws_col = sx;
@@ -61,6 +59,9 @@ fork_exec_with_pty
     stopTimer();
 
     *child_pid = forkpty(&pty, NULL, NULL, &ws);
+
+    int ret = pty;
+
     switch (*child_pid) {
     case -1:
         unblockUserSignals();
