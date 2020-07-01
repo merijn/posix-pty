@@ -54,7 +54,7 @@ module System.Posix.Pty (
 import Control.Applicative
 #endif
 
-import Control.Concurrent (newMVar, withMVar, MVar)
+import Control.Concurrent (withMVar)
 import Control.Exception (bracket, throwIO, ErrorCall(..))
 import Control.Monad (when)
 
@@ -73,7 +73,6 @@ import Foreign.C.String (CString, newCString)
 import Foreign.C.Types
 
 import System.IO.Error (mkIOError, eofErrorType)
-import System.IO.Unsafe (unsafePerformIO)
 import System.Posix.IO (fdReadBuf, fdWriteBuf,closeFd)
 import System.Posix.Types
 import System.Process.Internals (mkProcessHandle, runInteractiveProcess_lock, ProcessHandle)
