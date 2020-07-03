@@ -198,8 +198,6 @@ ptyDimensions (Pty fd) = alloca $ \x -> alloca $ \y -> do
 --
 -- > pty <- spawnWithPty (Just [("SHELL", "tcsh")]) True "ls" ["-l"] (20, 10)
 --
-
-
 -- This searches the user's PATH for a binary called @ls@, then runs this
 -- binary with the commandline argument @-l@ in a terminal that is 20
 -- characters wide and 10 characters high. The environment of @ls@ will
