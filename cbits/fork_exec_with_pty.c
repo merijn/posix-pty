@@ -21,6 +21,12 @@
 
 #include <HsFFI.h>
 
+#include "Rts.h"
+
+// Rts internal API, not exposed in a public header file
+extern void blockUserSignals(void);
+extern void unblockUserSignals(void);
+
 #include "fork_exec_with_pty.h"
 
 /* Should be exported by unistd.h, but isn't on OSX. */
@@ -48,11 +54,23 @@ fork_exec_with_pty
     ws.ws_row = sy;
 
     /* Fork and exec, returning the master pty. */
+    blockUserSignals();
+    stopTimer();
+
     *child_pid = forkpty(&pty, NULL, NULL, &ws);
+
+    int ret = pty;
+
     switch (*child_pid) {
     case -1:
+        unblockUserSignals();
+        startTimer();
+
         return -1;
     case 0:
+        /* Child process */
+        unblockUserSignals();
+
         /* If an environment is specified, override the old one. */
         if (env) environ = (char**) env;
 
@@ -63,10 +81,15 @@ fork_exec_with_pty
         perror("exec failed");
         exit(EXIT_FAILURE);
     default:
+        /* Parent process */
+
         /* Switch the pty to packet mode, we'll deal with packeting on the
            haskell side of things. */
-        if (ioctl(pty, TIOCPKT, &packet_mode) == -1) return 1;
+        if (ioctl(pty, TIOCPKT, &packet_mode) == -1) ret = 1;
 
-        return pty;
+        unblockUserSignals();
+        startTimer();
+
+        return ret;
     }
 }

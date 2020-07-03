@@ -54,6 +54,7 @@ module System.Posix.Pty (
 import Control.Applicative
 #endif
 
+import Control.Concurrent (withMVar)
 import Control.Exception (bracket, throwIO, ErrorCall(..))
 import Control.Monad (when)
 
@@ -74,7 +75,7 @@ import Foreign.C.Types
 import System.IO.Error (mkIOError, eofErrorType)
 import System.Posix.IO (fdReadBuf, fdWriteBuf,closeFd)
 import System.Posix.Types
-import System.Process.Internals (mkProcessHandle, ProcessHandle)
+import System.Process.Internals (mkProcessHandle, runInteractiveProcess_lock, ProcessHandle)
 
 import qualified System.Posix.Terminal as T
 import System.Posix.Terminal hiding
@@ -225,7 +226,8 @@ spawnWithPty env' (fromBool -> search) path' argv' (x, y) = do
         bracket allocLists cleanupLists $ \(argv, env) -> do
             alloca $ \pidPtr -> do
                 fd <- throwErrnoIfMinus1Retry "failed to fork or open pty" $
-                        fork_exec_with_pty x y search path argv env pidPtr
+                        withMVar runInteractiveProcess_lock $ \_ ->
+                          fork_exec_with_pty x y search path argv env pidPtr
 
                 pid <- peek pidPtr
                 handle <- mkProcessHandle (fromIntegral pid) True
