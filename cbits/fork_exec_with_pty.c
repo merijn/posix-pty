@@ -21,7 +21,6 @@
 
 #include <HsFFI.h>
 
-#include "HsBase.h"
 #include "Rts.h"
 
 // Rts internal API, not exposed in a public header file
