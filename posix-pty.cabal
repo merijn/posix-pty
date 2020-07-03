@@ -1,12 +1,12 @@
 Name:                posix-pty
-Version:             0.2.1.1
+Version:             0.2.2
 
 Homepage:            https://bitbucket.org/merijnv/posix-pty
 Bug-Reports:         https://github.com/merijn/posix-pty/issues
 
 Author:              Merijn Verstraaten
 Maintainer:          Merijn Verstraaten <merijn@inconsistent.nl>
-Copyright:           Copyright © 2013-2015 Merijn Verstraaten,
+Copyright:           Copyright © 2013-2020 Merijn Verstraaten,
                      Copyright © 2014 Vladimir Kirillov
 
 License:             BSD3
@@ -28,7 +28,6 @@ Extra-Source-Files:     cbits/*.h
 Library
   Default-Language:     Haskell2010
   GHC-Options:          -Wall
-  GHC-Prof-Options:     -auto-all -caf-all -rtsopts
   Exposed-Modules:      System.Posix.Pty
   Other-Modules:        
 
