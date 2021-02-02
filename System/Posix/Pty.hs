@@ -20,6 +20,7 @@
 module System.Posix.Pty (
     -- * Subprocess Creation
       spawnWithPty
+    , spawnWithPtyPixel
     -- * Data Structures
     , Pty
     , PtyControlCode (..)
@@ -30,7 +31,9 @@ module System.Posix.Pty (
     , readPty
     , writePty
     , resizePty
+    , resizePtyPixel
     , ptyDimensions
+    , ptyDimensionsPixel
     -- * Blocking on 'Pty's
     , threadWaitReadPty
     , threadWaitWritePty
@@ -182,14 +185,22 @@ writePty (Pty fd) bs =
 
 -- | Set the pseudo terminal's dimensions to the specified width and height.
 resizePty :: Pty -> (Int, Int) -> IO ()
-resizePty (Pty fd) (x, y) =
-  throwErrnoIfMinus1Retry_ "unable to set pty dimensions" $ set_pty_size fd x y
+resizePty pty (x, y) = resizePtyPixel pty (x, y, 0, 0)
+
+-- | The same as 'resizePty', but also allows setting the dimension in pixels.
+resizePtyPixel :: Pty -> (Int, Int, Int, Int) -> IO ()
+resizePtyPixel (Pty fd) (x, y, xpixel, ypixel) =
+  throwErrnoIfMinus1Retry_ "unable to set pty dimensions" $ set_pty_size fd x y xpixel ypixel
 
 -- | Produces the pseudo terminal's current dimensions.
 ptyDimensions :: Pty -> IO (Int, Int)
-ptyDimensions (Pty fd) = alloca $ \x -> alloca $ \y -> do
-    throwErrnoIfMinus1Retry_ "unable to get pty size" $ get_pty_size fd x y
-    (,) <$> peek x <*> peek y
+ptyDimensions = fmap (\(x, y, _, _) -> (x, y)) . ptyDimensionsPixel
+
+-- | The same as 'ptyDimensions', but also returns the dimension in pixels (pixel dimensions might be zero when not supported by the terminal emulator).
+ptyDimensionsPixel :: Pty -> IO (Int, Int, Int, Int)
+ptyDimensionsPixel (Pty fd) = alloca $ \x -> alloca $ \y -> alloca $ \xpixel -> alloca $ \ypixel -> do
+    throwErrnoIfMinus1Retry_ "unable to get pty size" $ get_pty_size fd x y xpixel ypixel
+    (,,,) <$> peek x <*> peek y <*> peek xpixel <*> peek ypixel
 
 -- | Create a new process that is connected to the current process through a
 -- pseudo terminal. If an environment is specified, then only the specified
@@ -212,7 +223,11 @@ spawnWithPty :: Maybe [(String, String)]    -- ^ Optional environment for the
              -> (Int, Int)                  -- ^ Initial dimensions for the
                                             --   pseudo terminal.
              -> IO (Pty, ProcessHandle)
-spawnWithPty env' (fromBool -> search) path' argv' (x, y) = do
+spawnWithPty env' search path' argv' (x, y) = spawnWithPtyPixel env' search path' argv' (x, y, 0, 0)
+
+-- | Like 'spawnWithPty', but can also set pty dimensions in pixels.
+spawnWithPtyPixel :: Maybe [(String, String)] -> Bool -> FilePath -> [String] -> (Int, Int, Int, Int) -> IO (Pty, ProcessHandle)
+spawnWithPtyPixel env' (fromBool -> search) path' argv' (x, y, xpixel, ypixel) = do
     bracket allocStrings cleanupStrings $ \(path, argvList, envList) -> do
         let allocLists = do
                 argv <- newArray0 nullPtr (path : argvList)
@@ -227,7 +242,7 @@ spawnWithPty env' (fromBool -> search) path' argv' (x, y) = do
             alloca $ \pidPtr -> do
                 fd <- throwErrnoIfMinus1Retry "failed to fork or open pty" $
                         withMVar runInteractiveProcess_lock $ \_ ->
-                          fork_exec_with_pty x y search path argv env pidPtr
+                          fork_exec_with_pty x y xpixel ypixel search path argv env pidPtr
 
                 pid <- peek pidPtr
                 handle <- mkProcessHandle (fromIntegral pid) True
@@ -283,13 +298,15 @@ foreign import capi unsafe "sys/ioctl.h value TIOCPKT_NOSTOP"
     tiocPktNoStop :: Word8
 
 foreign import ccall "pty_size.h"
-    set_pty_size :: Fd -> Int -> Int -> IO CInt
+    set_pty_size :: Fd -> Int -> Int -> Int -> Int -> IO CInt
 
 foreign import ccall "pty_size.h"
-    get_pty_size :: Fd -> Ptr Int -> Ptr Int -> IO CInt
+    get_pty_size :: Fd -> Ptr Int -> Ptr Int -> Ptr Int -> Ptr Int -> IO CInt
 
 foreign import ccall "fork_exec_with_pty.h"
     fork_exec_with_pty :: Int
+                       -> Int
+                       -> Int
                        -> Int
                        -> CInt
                        -> CString

@@ -1,3 +1,4 @@
+#define _DEFAULT_SOURCE
 #define _BSD_SOURCE
 #include <sys/ioctl.h>
 
@@ -37,6 +38,8 @@ int
 fork_exec_with_pty
     ( HsInt sx
     , HsInt sy
+    , HsInt sxpixel
+    , HsInt sypixel
     , int search
     , const char *file
     , char *const argv[]
@@ -52,6 +55,8 @@ fork_exec_with_pty
     memset(&ws, 0, sizeof ws);
     ws.ws_col = sx;
     ws.ws_row = sy;
+    ws.ws_xpixel = sxpixel;
+    ws.ws_ypixel = sypixel;
 
     /* Fork and exec, returning the master pty. */
     blockUserSignals();

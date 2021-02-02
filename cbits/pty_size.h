@@ -4,9 +4,9 @@
 #include <HsFFI.h>
 
 int
-set_pty_size(int fd, HsInt x, HsInt y);
+set_pty_size(int fd, HsInt x, HsInt y, HsInt xpixel, HsInt ypixel);
 
 int
-get_pty_size(int fd, HsInt *x, HsInt *y);
+get_pty_size(int fd, HsInt *x, HsInt *y, HsInt *xpixel, HsInt *ypixel);
 
 #endif
