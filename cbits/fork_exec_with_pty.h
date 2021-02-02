@@ -7,6 +7,8 @@ int
 fork_exec_with_pty
     ( HsInt sx
     , HsInt sy
+    , HsInt sxpixel
+    , HsInt sypixel
     , int search
     , const char *file
     , char *const argv[]
